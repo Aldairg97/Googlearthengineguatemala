@@ -1,0 +1,193 @@
+/*
+ * Configurar capas y ubicaciones
+ */
+var hansen = ee.Image('UMD/hansen/global_forest_change_2017_v1_5');
+var propiedadesCapa = {
+  'Año de Pérdida': {
+    name: 'lossyear',
+    visParams: {min: 0, max: 24, palette: ['yellow', 'orange', 'red']},
+    legend: [
+      {'2024': 'red'}, {'2020': 'orange'}, {'2000': 'yellow'},
+      {'Sin pérdida': 'black'}, {'Agua o sin datos': 'grey'}
+    ],
+    defaultVisibility: true
+  },
+  'Pérdida': {
+    name: 'loss',
+    visParams: {min: 0, max: 1, palette: ['black', 'red']},
+    legend: [
+      {'Pérdida': 'red'}, {'Sin pérdida': 'black'}, {'Agua o sin datos': 'grey'}
+    ],
+    defaultVisibility: false
+  },
+  'Porcentaje de Cobertura Forestal': {
+    name: 'treecover2000',
+    visParams: {min: 0, max: 100, palette: ['black', 'green']},
+    legend: [
+      {'75-100%': '#00ff00'}, {'50-75%': '#00aa00'}, {'25-50%': '#005500'},
+      {'0-25%': '#000000'}, {'Agua o sin datos': '#404040'}
+    ],
+    defaultVisibility: false
+  }
+};
+
+// Algunas ubicaciones de interés predefinidas que se cargarán en un menú desplegable.
+var ubicaciones = {
+  'Deforestación en Guatemala': {lon: -89.8982479, lat: 16.9145203, zoom: 8},
+  'Tornado en Alabama': {lon: -87.332, lat: 33.313, zoom: 11}
+};
+
+/*
+ * Configuración del panel del mapa
+ */
+
+// Crear un panel de mapa.
+var panelMapa = ui.Map();
+
+// Configurar el mapa para mostrar líneas y bordes
+panelMapa.setOptions('HYBRID');
+
+// Quitar todas las herramientas del mapa excepto las de zoom y control de tipo de mapa.
+panelMapa.setControlVisibility(
+    {all: false, zoomControl: true, mapTypeControl: true});
+
+// Centrar el mapa en la ubicación predeterminada.
+var ubicacionPredeterminada = ubicaciones['Deforestación en Guatemala'];
+panelMapa.setCenter(
+    ubicacionPredeterminada.lon, ubicacionPredeterminada.lat, ubicacionPredeterminada.zoom);
+
+// Añadir estas configuraciones a la interfaz.
+ui.root.widgets().reset([panelMapa]);
+ui.root.setLayout(ui.Panel.Layout.flow('horizontal'));
+
+// Añadir capas al mapa y centrarlas.
+for (var key in propiedadesCapa) {
+  var capa = propiedadesCapa[key];
+  var imagen = hansen.select(capa.name).visualize(capa.visParams);
+  var enmascarada = agregarMascara(imagen, hansen.select(capa.name));
+  panelMapa.add(ui.Map.Layer(enmascarada, {}, key, capa.defaultVisibility));
+}
+
+// Dibuja superposiciones negras y grises para valores sin datos/agua/cero.
+function agregarMascara(visualizada, original) {
+  var agua =
+      hansen.select('datamask').neq(1).selfMask().visualize({palette: 'gray'});
+  var cero = original.eq(0).selfMask().visualize({palette: 'white'});
+  return ee.ImageCollection([visualizada, cero, agua]).mosaic();
+}
+
+/*
+ * Configuración de componentes adicionales
+ */
+
+// Añadir un título y texto explicativo a un panel lateral.
+var encabezado = ui.Label('Cambio Global en Bosques', {fontSize: '36px', color: 'red'});
+var texto = ui.Label(
+    'Resultados del análisis de imágenes Landsat que caracterizan la extensión y el cambio forestal.',
+    {fontSize: '11px'});
+
+var panelHerramientas = ui.Panel([encabezado, texto], 'flow', {width: '300px'});
+ui.root.widgets().add(panelHerramientas);
+
+// Crear un hipervínculo a una referencia externa.
+var enlace = ui.Label(
+    'Artículo científico de Hansen, Potapov, Moore, Hancher et al.', {},
+    'http://science.sciencemag.org/content/342/6160/850');
+var panelEnlace = ui.Panel(
+    [ui.Label('Para más información', {fontWeight: 'bold'}), enlace]);
+panelHerramientas.add(panelEnlace);
+
+// Menú desplegable para seleccionar capas y actualizar la leyenda.
+var elementosSeleccion = Object.keys(propiedadesCapa);
+var seleccionCapa = ui.Select({
+  items: elementosSeleccion,
+  value: elementosSeleccion[0],
+  onChange: function(seleccionado) {
+    panelMapa.layers().forEach(function(elemento) {
+      elemento.setShown(seleccionado == elemento.getName());
+    });
+    actualizarLeyenda(propiedadesCapa[seleccionado].legend);
+  }
+});
+
+// Añadir menú de selección al panel.
+panelHerramientas.add(ui.Label('Ver Diferentes Capas', {'font-size': '24px'}));
+panelHerramientas.add(seleccionCapa);
+
+// Configuración y actualización de la leyenda.
+var panelLeyenda = ui.Panel({
+  style:
+      {fontWeight: 'bold', fontSize: '10px', margin: '0 0 0 8px', padding: '0'}
+});
+panelHerramientas.add(panelLeyenda);
+
+var tituloLeyenda = ui.Label(
+    'Leyenda',
+    {fontWeight: 'bold', fontSize: '10px', margin: '0 0 4px 0', padding: '0'});
+panelLeyenda.add(tituloLeyenda);
+
+var panelClave = ui.Panel();
+panelLeyenda.add(panelClave);
+
+function actualizarLeyenda(leyenda) {
+  panelClave.clear();
+  for (var i = 0; i < leyenda.length; i++) {
+    var item = leyenda[i];
+    var nombre = Object.keys(item)[0];
+    var color = item[nombre];
+    var cajaColor = ui.Label('', {
+      backgroundColor: color,
+      padding: '8px',
+      margin: '0'
+    });
+    var descripcion = ui.Label(nombre, {margin: '0 0 4px 6px'});
+    panelClave.add(ui.Panel([cajaColor, descripcion], ui.Panel.Layout.Flow('horizontal')));
+  }
+}
+
+// Inicializar la leyenda.
+actualizarLeyenda(propiedadesCapa[seleccionCapa.getValue()].legend);
+
+// Checkbox y deslizador para visibilidad y opacidad de las capas.
+var checkbox = ui.Checkbox({
+  label: 'Opacidad',
+  value: true,
+  onChange: function(valor) {
+    var seleccionado = seleccionCapa.getValue();
+    panelMapa.layers().forEach(function(elemento) {
+      elemento.setShown(seleccionado == elemento.getName() ? valor : false);
+    });
+    seleccionCapa.setDisabled(!valor);
+  }
+});
+
+var deslizadorOpacidad = ui.Slider({
+  min: 0,
+  max: 1,
+  value: 1,
+  step: 0.01,
+});
+deslizadorOpacidad.onSlide(function(valor) {
+  panelMapa.layers().forEach(function(elemento) {
+    elemento.setOpacity(valor);
+  });
+});
+
+var panelVista = ui.Panel([checkbox, deslizadorOpacidad], ui.Panel.Layout.Flow('horizontal'));
+panelHerramientas.add(panelVista);
+
+// Selección de ubicación en un menú desplegable.
+var ubicacionesDisponibles = Object.keys(ubicaciones);
+var seleccionUbicacion = ui.Select({
+  items: ubicacionesDisponibles,
+  value: ubicacionesDisponibles[0],
+  onChange: function(valor) {
+    var ubicacion = ubicaciones[valor];
+    panelMapa.setCenter(ubicacion.lon, ubicacion.lat, ubicacion.zoom);
+  }
+});
+
+var panelUbicacion = ui.Panel([
+  ui.Label('Visitar Ubicaciones de Ejemplo', {'font-size': '24px'}), seleccionUbicacion
+]);
+panelHerramientas.add(panelUbicacion);
